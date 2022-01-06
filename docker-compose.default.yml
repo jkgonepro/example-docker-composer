@@ -1,0 +1,240 @@
+### ######################################################## ###
+###                       Check README                       ###
+### ######################################################## ###
+version: "3"
+
+### Networks Setup ############################################
+networks:
+  network_paydia:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.200.0.0/24
+
+services:
+  ### 0.3 - MariaDB Container PORT 3306 (same as mysql) ############################################
+  service_mariadb:
+    image: mariadb:10.1
+    container_name: service_mariadb
+    environment:
+      MYSQL_ROOT_USER: root
+      MYSQL_ROOT_PASSWORD: secret
+      MYSQL_USER: homestead
+      MYSQL_PASSWORD: secret
+      MYSQL_DATABASE: local_3
+    ports:
+      - 3376:3306
+    volumes:
+      - ./docker/mariadb/my.cnf:/etc/mysql/my.cnf:ro
+      - ./docker/scripts/import_db.sh:/import_db.sh:ro
+      - ./docker/scripts/rename_db.sh:/rename_db.sh:ro
+      # Share data mysql data with host
+      - ./storage/mariadb:/var/lib/mysql:delegated #different than mysql
+      # Initial migration when container is created
+      - ./storage/data:/docker-entrypoint-initdb.d/:ro
+    networks:
+      network_paydia:
+        ipv4_address: 10.200.0.3
+
+  ### 0.4 - Mailcatcher container ############################################
+  service_mailcatcher:
+    image: schickling/mailcatcher
+    container_name: service_mailcatcher
+    ports:
+      - 1080:1080
+      - 1025:1025
+    networks:
+      network_paydia:
+        ipv4_address: 10.200.0.4
+
+  ### 0.5 - PhpMyAdmin Container ############################################
+  service_phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    container_name: service_phpmyadmin
+    restart: always
+    depends_on:
+      - service_mariadb #- service_mysql
+    links:
+      #- service_mysql:mysql
+      - service_mariadb:mariadb
+    environment:
+      MYSQL_ROOT_HOST: '%'
+      MYSQL_ROOT_USER: root
+      MYSQL_ROOT_PASSWORD: secret
+      MYSQL_USER: homestead
+      MYSQL_PASSWORD: secret
+      MYSQL_DATABASE: local_3
+      PMA_HOST: mariadb # mysql
+    ports:
+      - 8081:80 # - 8081:8081
+    networks:
+      network_paydia:
+        ipv4_address: 10.200.0.5
+
+  ### 0.6 - PHP 7.4 - Laravel Container
+  service_laravel_PHP7.4_20.04:
+    image: ubuntu:20.04
+    container_name: service_laravel_PHP7.4_20.04
+    environment:
+      PHP_EXTENSION_DEBUG: 1
+      PHP_INI_XDEBUG__REMOTE_PORT: 9002
+      PHP_IDE_CONFIG: "serverName=docker-laravel"
+      XDEBUG_CONFIG: "remote_host=host.docker.internal remote_port=9002 remote_autostart=1 remote_connect_back=1 remote_log=/var/log/xdebug/xdebug.log"
+    restart: on-failure
+    depends_on:
+      - service_mariadb
+    ports:
+      - 80:80
+    volumes:
+      ### -------------------------- Global  ---------------------------
+      ### Other Global Docker configuration
+      - .\docker\php-fpm\php-fpm.conf:/usr/local/etc/php-fpm.conf:ro
+      - .\docker\php-fpm\www.conf:/usr/local/etc/php-fpm.d/www.conf:ro
+      - .\docker\xdebug\docker-php-ext-xdebug.ini:/etc/php/7.4/fpm/conf.d/20-xdebug.ini:ro
+      - .\docker\xdebug\docker-php7.4-ext-xdebug.ini:/etc/php/7.4/mods-available/xdebug.ini:ro
+      - .\docker\ssh:/tmp/.ssh:ro
+      ### ------------------------------------ Scripts [Use WGET] ------------------------------------
+      - .\docker\bitbucket\oauth:/tmp/bitbucket_oauth:ro
+      - .\docker\scripts\7.4\install.sh:/tmp/install.sh:ro
+      ### ------------------------------------- Configs ------------------------------------
+      - .\docker\scripts\apps.txt:/tmp/apps.txt:ro
+      - .\docker\redis.conf:/etc/redis/redis.conf #:ro
+      - .\docker\supervisord.conf:/etc/supervisord.conf:ro
+      ### -------------------------- included in supervisord.conf --------------------------
+      - .\docker\redis-server.conf:/etc/supervisor/conf.d/redis-server.conf #:ro
+      ### -------------------------- included in supervisord.conf --------------------------
+      - .\docker\supervisor\laravel-main-worker.conf:/etc/supervisor/conf.d/laravel-main-worker.conf:ro
+      - .\docker\supervisor\redis-main-subscriber.conf:/etc/supervisor/conf.d/redis-main-subscriber.conf:ro
+      ### -------------------------------------------------------------
+      ### --------------------------- NGINX  --------------------------
+      - .\docker\nginx\7.4\core\nginx.conf:/etc/nginx/nginx.conf #:ro
+      ### ---------------------------- APP Admin ----------------------------
+      ### Admin App Configuration
+      - .\projects\admin:/var/www/html/admin:cached
+      - .\docker\nginx\7.4\admin.conf:/etc/nginx/sites-available/admin.conf:ro
+      - .\docker\nginx\7.4\admin.conf:/etc/nginx/sites-enabled/admin.conf:ro
+      ### ---------------------------- APP Shop ----------------------------
+      ### Admin App Configuration
+      - .\projects\shop:/var/www/html/shop:cached
+      - .\docker\nginx\7.4\shop.conf:/etc/nginx/sites-available/shop.conf:ro
+      - .\docker\nginx\7.4\shop.conf:/etc/nginx/sites-enabled/shop.conf:ro
+      ### ----------------------------   --   ----------------------------
+    command:
+      - /tmp/install.sh
+    networks:
+      network_paydia:
+        ipv4_address: 10.200.0.6
+
+  ### 0.7 - PHP 7.0 - Laravel Container
+  service_laravel_PHP7.0_16.04:
+    image: ubuntu:16.04
+    container_name: service_laravel_PHP7.0_16.04
+      #profiles:
+    #- donotstart
+    environment:
+      PHP_EXTENSION_DEBUG: 1
+      PHP_INI_XDEBUG__REMOTE_PORT: 9002
+      PHP_IDE_CONFIG: "serverName=docker-laravel"
+      XDEBUG_CONFIG: "remote_host=host.docker.internal remote_port=9002 remote_autostart=1 remote_connect_back=1 remote_log=/var/log/xdebug/xdebug.log"
+    restart: on-failure
+    depends_on:
+      - service_mariadb
+    ports:
+      - 8088:80
+    volumes:
+      ### -------------------------- Global  ---------------------------
+      ### Other Global Docker configuration
+      - .\docker\php-fpm\php-fpm.conf:/usr/local/etc/php-fpm.conf:ro
+      - .\docker\php-fpm\www.conf:/usr/local/etc/php-fpm.d/www.conf:ro
+      - .\docker\xdebug\docker-php-ext-xdebug.ini:/etc/php/7.0/fpm/conf.d/20-xdebug.ini:ro
+      - .\docker\xdebug\docker-php7.0-ext-xdebug.ini:/etc/php/7.0/mods-available/xdebug.ini:ro
+      - .\docker\ssh:/tmp/.ssh:ro
+      ### ------------------------------------ Scripts [Use WGET] ------------------------------------
+      - .\docker\bitbucket\oauth:/tmp/bitbucket_oauth:ro
+      - .\docker\scripts\7.0\install.sh:/tmp/install.sh:ro
+      ### ------------------------------------- Configs ------------------------------------
+      - .\docker\scripts\apps.txt:/tmp/apps.txt:ro
+      - .\docker\redis.conf:/etc/redis/redis.conf #:ro
+      - .\docker\supervisord.conf:/etc/supervisord.conf:ro
+      ### -------------------------- included in supervisord.conf --------------------------
+      - .\docker\redis-server.conf:/etc/supervisor/conf.d/redis-server.conf #:ro
+      ### -------------------------- included in supervisord.conf --------------------------
+      - .\docker\supervisor\laravel-main-worker.conf:/etc/supervisor/conf.d/laravel-main-worker.conf:ro
+      - .\docker\supervisor\redis-main-subscriber.conf:/etc/supervisor/conf.d/redis-main-subscriber.conf:ro
+      ### -------------------------------------------------------------
+      ### --------------------------- NGINX  --------------------------
+      - .\docker\nginx\7.0\core\nginx.conf:/etc/nginx/nginx.conf #:ro
+      ### ---------------------------- APP Admin ----------------------------
+      ### Admin App Configuration
+      - .\projects\admin:/var/www/html/admin:cached
+      - .\docker\nginx\7.0\admin.conf:/etc/nginx/sites-available/admin.conf:ro
+      - .\docker\nginx\7.0\admin.conf:/etc/nginx/sites-enabled/admin.conf:ro
+      ### ---------------------------- APP Shop ----------------------------
+      ### Admin App Configuration
+      - .\projects\shop:/var/www/html/shop:cached
+      - .\docker\nginx\7.0\shop.conf:/etc/nginx/sites-available/shop.conf:ro
+      - .\docker\nginx\7.0\shop.conf:/etc/nginx/sites-enabled/shop.conf:ro
+      ### ----------------------------   --   ----------------------------
+    command:
+      - /tmp/install.sh
+    networks:
+      network_paydia:
+        ipv4_address: 10.200.0.7
+
+  ### 0.7 - PHP 7.2 - Laravel Container ############################################
+  service_laravel_PHP7.2_18.04:
+    image: ubuntu:18.04
+    container_name: service_laravel_PHP7.2_18.04
+      #profiles:
+      #- donotstart
+    #- donotstart
+    environment:
+      PHP_EXTENSION_DEBUG: 1
+      PHP_INI_XDEBUG__REMOTE_PORT: 9002
+      PHP_IDE_CONFIG: "serverName=docker-laravel"
+      XDEBUG_CONFIG: "remote_host=host.docker.internal remote_port=9002 remote_autostart=1 remote_connect_back=1 remote_log=/var/log/xdebug/xdebug.log"
+    restart: on-failure
+    depends_on:
+      - service_mariadb
+    ports:
+      - 8089:80 # outside 8089
+    volumes:
+      ### -------------------------- Global  ---------------------------
+      ### Other Global Docker configuration
+      - .\docker\php-fpm\php-fpm.conf:/usr/local/etc/php-fpm.conf:ro
+      - .\docker\php-fpm\www.conf:/usr/local/etc/php-fpm.d/www.conf:ro
+      - .\docker\xdebug\docker-php-ext-xdebug.ini:/etc/php/7.2/fpm/conf.d/20-xdebug.ini:ro
+      - .\docker\xdebug\docker-php7.2-ext-xdebug.ini:/etc/php/7.2/mods-available/xdebug.ini:ro
+      - .\docker\ssh:/tmp/.ssh:ro
+      ### ------------------------------------ Scripts [Use WGET] ------------------------------------
+      - .\docker\bitbucket\oauth:/tmp/bitbucket_oauth:ro
+      - .\docker\scripts\7.2\install.sh:/tmp/install.sh:ro
+      ### ------------------------------------- Configs ------------------------------------
+      - .\docker\scripts\apps.txt:/tmp/apps.txt:ro
+      - .\docker\redis.conf:/etc/redis/redis.conf #:ro
+      - .\docker\supervisord.conf:/etc/supervisord.conf:ro
+      ### -------------------------- included in supervisord.conf --------------------------
+      - .\docker\redis-server.conf:/etc/supervisor/conf.d/redis-server.conf #:ro
+      ### -------------------------- included in supervisord.conf --------------------------
+      - .\docker\supervisor\laravel-main-worker.conf:/etc/supervisor/conf.d/laravel-main-worker.conf:ro
+      - .\docker\supervisor\redis-main-subscriber.conf:/etc/supervisor/conf.d/redis-main-subscriber.conf:ro
+      ### -------------------------------------------------------------
+      ### --------------------------- NGINX  --------------------------
+      - .\docker\nginx\7.2\core\nginx.conf:/etc/nginx/nginx.conf #:ro
+      ### ---------------------------- APP Admin ----------------------------
+      ### Admin App Configuration
+      - .\projects\admin:/var/www/html/admin:cached
+      - .\docker\nginx\7.2\admin.conf:/etc/nginx/sites-available/admin.conf:ro
+      - .\docker\nginx\7.2\admin.conf:/etc/nginx/sites-enabled/admin.conf:ro
+      ### ---------------------------- APP Shop ----------------------------
+      ### Admin App Configuration
+      - .\projects\shop:/var/www/html/shop:cached
+      - .\docker\nginx\7.2\shop.conf:/etc/nginx/sites-available/shop.conf:ro
+      - .\docker\nginx\7.2\shop.conf:/etc/nginx/sites-enabled/shop.conf:ro
+      ### ----------------------------   --   ----------------------------
+    command:
+      - /tmp/install.sh
+    networks:
+      network_paydia:
+        ipv4_address: 10.200.0.8
